@@ -18,6 +18,8 @@ services:
       - OLLAMA_MAX_LOADED_MODELS=3
       - OLLAMA_HOST=0.0.0.0:11434
       - OLLAMA_ORIGINS=*
+    env_file:
+      - path: .env
     # GPU support
     deploy:
       resources:
@@ -41,7 +43,7 @@ services:
               - ~/.cache/huggingface:/root/.cache/huggingface
               - vllm_models:/models
           environment:
-              - HUGGING_FACE_HUB_TOKEN={CHANGEME}
+              - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_TOKEN}
           ports:
               - 8000:8000
           ipc: host
