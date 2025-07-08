@@ -41,7 +41,7 @@ services:
               - ~/.cache/huggingface:/root/.cache/huggingface
               - vllm_models:/models
           environment:
-              - HUGGING_FACE_HUB_TOKEN=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
+              - HUGGING_FACE_HUB_TOKEN={CHANGEME}
           ports:
               - 8000:8000
           ipc: host
