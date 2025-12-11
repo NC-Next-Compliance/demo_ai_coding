@@ -1,0 +1,237 @@
+services:
+  ollama:
+    volumes:
+      - ollama:/root/.ollama
+    container_name: ollama
+    restart: unless-stopped
+    pull_policy: always
+    tty: true
+    image: ollama/ollama:${OLLAMA_DOCKER_TAG:-latest}
+    ports:
+      - ${OLLAMA_PORT:-11434}:11434
+    expose:
+      - 11434
+    networks:
+      - desktop_net
+    environment:
+      - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-4}
+      - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS:-3}
+      - OLLAMA_HOST=0.0.0.0:11434
+      - OLLAMA_ORIGINS=*
+    env_file:
+      - path: .env
+        required: false
+      - path: .env.sample
+        required: true
+    # GPU support
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: ${OLLAMA_GPU_DRIVER:-nvidia}
+              count: ${OLLAMA_GPU_COUNT:-1}
+              capabilities:
+                - gpu
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  ollama-pull-model:
+    image: ollama/ollama:${OLLAMA_DOCKER_TAG:-latest}
+    container_name: ollama-pull-model
+    networks:
+      - desktop_net
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        echo "Waiting for Ollama service to be ready..."
+        sleep 5
+        echo "Pulling ${OLLAMA_MODEL:-nomic-embed-text} model..."
+        ollama pull ${OLLAMA_MODEL:-nomic-embed-text}
+        echo "Model pull completed successfully"
+    restart: "no"
+    env_file:
+      - path: .env
+        required: false
+      - path: .env.sample
+        required: true
+
+ # vllm-cuda:
+ #         deploy:
+ #             resources:
+ #                 reservations:
+ #                     devices:
+ #                         - driver: nvidia
+ #                           count: all
+ #                           capabilities:
+ #                               - gpu
+ #         volumes:
+ #             - ~/.cache/huggingface:/root/.cache/huggingface
+ #             - vllm_models:/models
+ #         environment:
+ #             - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_TOKEN}
+ #         ports:
+ #             - 8000:8000
+ #         ipc: host
+ #         image: hunyuaninfer/hunyuan-infer-vllm-cuda12.4:v1
+ #         command: --model tencent/Hunyuan-A13B-Instruct --trust_remote_code
+ #         networks:
+ #           - desktop_net
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    restart: always
+    container_name: qdrant
+    ports:
+      - ${QDRANT_PORT:-6333}:6333
+      - ${QDRANT_GRPC_PORT:-6334}:6334
+    expose:
+      - 6333
+      - 6334
+      - 6335
+    configs:
+      - source: qdrant_config
+        target: /qdrant/config/production.yaml
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - desktop_net
+    env_file:
+      - path: .env
+        required: false
+      - path: .env.sample
+        required: true
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:6333/readyz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:${WEBUI_DOCKER_TAG:-main}
+    restart: always
+    container_name: open-webui
+    volumes:
+      - open-webui:/app/backend/data
+    depends_on:
+      ollama:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    ports:
+      - ${OPEN_WEBUI_PORT:-3000}:8080
+    environment:
+      # Ollama Configuration
+      - OLLAMA_BASE_URL=http://ollama:11434
+      
+      # Security Configuration
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY:-}
+      - WEBUI_URL=${WEBUI_URL:-http://localhost:3000}
+      - ENABLE_LOGIN_FORM=${ENABLE_LOGIN_FORM:-true}
+      - ENABLE_OAUTH_ROLE_MANAGEMENT=${ENABLE_OAUTH_ROLE_MANAGEMENT:-true}
+      - ENABLE_OAUTH_PERSISTENT_CONFIG=${ENABLE_OAUTH_PERSISTENT_CONFIG:-true}
+      
+      # Database Configuration
+      - DATABASE_ENABLE_SQLITE_WAL=${DATABASE_ENABLE_SQLITE_WAL:-true}
+      - DATABASE_POOL_SIZE=${DATABASE_POOL_SIZE:-10}
+      - DATABASE_POOL_MAX_OVERFLOW=${DATABASE_POOL_MAX_OVERFLOW:-20}
+      - DATABASE_DEDUPLICATE_INTERVAL=${DATABASE_DEDUPLICATE_INTERVAL:-0.5}
+      
+      # Vector Database Configuration (Qdrant)
+      - VECTOR_DB=${VECTOR_DB:-qdrant}
+      - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
+      
+      # RAG Configuration
+      - RAG_EMBEDDING_ENGINE=${RAG_EMBEDDING_ENGINE:-ollama}
+      - RAG_EMBEDDING_MODEL=${RAG_EMBEDDING_MODEL:-nomic-embed-text}
+      - RAG_EMBEDDING_MODEL_AUTO_UPDATE=${RAG_EMBEDDING_MODEL_AUTO_UPDATE:-true}
+      - RAG_TOP_K=${RAG_TOP_K:-5}
+      - RAG_RELEVANCE_THRESHOLD=${RAG_RELEVANCE_THRESHOLD:-0.0}
+      - ENABLE_RAG_HYBRID_SEARCH=${ENABLE_RAG_HYBRID_SEARCH:-false}
+      - ENABLE_RAG_WEB_LOADER_SSL_VERIFICATION=${ENABLE_RAG_WEB_LOADER_SSL_VERIFICATION:-true}
+      
+      # Performance Configuration
+      - AIOHTTP_CLIENT_TIMEOUT=${AIOHTTP_CLIENT_TIMEOUT:-300}
+      - AIOHTTP_CLIENT_TIMEOUT_OPENAI_MODEL_LIST=${AIOHTTP_CLIENT_TIMEOUT_OPENAI_MODEL_LIST:-5}
+      
+      # Logging Configuration
+      - GLOBAL_LOG_LEVEL=${GLOBAL_LOG_LEVEL:-INFO}
+      - SHOW_ADMIN_DETAILS=${SHOW_ADMIN_DETAILS:-true}
+      - ENABLE_ADMIN_EXPORT=${ENABLE_ADMIN_EXPORT:-true}
+      
+      # Task Model Configuration (for lightweight operations)
+      - TASK_MODEL=${TASK_MODEL:-}
+      - TASK_MODEL_EXTERNAL=${TASK_MODEL_EXTERNAL:-}
+      
+      # =============================================================================
+      # AI PROVIDER CONFIGURATIONS
+      # =============================================================================
+      
+      # OpenAI API Configuration (GPT-4o, GPT-3.5-turbo, etc.)
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_API_BASE_URL=${OPENAI_API_BASE_URL:-https://api.openai.com/v1}
+      
+      # Anthropic API Configuration (Claude 3.5 Sonnet, etc.)
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ANTHROPIC_API_BASE_URL=${ANTHROPIC_API_BASE_URL:-https://api.anthropic.com/v1}
+      
+      # Google Gemini API Configuration (Gemini 2.0 Flash Experimental, etc.)
+      # Note: Gemini uses OpenAI-compatible endpoint
+      - GOOGLE_GEMINI_API_KEY=${GOOGLE_GEMINI_API_KEY}
+      - GOOGLE_GEMINI_API_BASE_URL=${GOOGLE_GEMINI_API_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai}
+      
+      # Together.ai API Configuration (Kimi-K2-Thinking, etc.)
+      # Note: Together.ai is OpenAI-compatible
+      - TOGETHER_API_KEY=${TOGETHER_API_KEY}
+      - TOGETHER_API_BASE_URL=${TOGETHER_API_BASE_URL:-https://api.together.xyz/v1}
+      
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    networks:
+      - desktop_net
+    env_file:
+      - path: .env
+        required: false
+      - path: .env.sample
+        required: true
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+configs:
+  qdrant_config:
+    content: |
+      log_level: INFO
+      storage:
+        # Performance optimization
+        optimizers:
+          deleted_threshold: 0.2
+          vacuum_min_vector_number: 1000
+          default_segment_number: 2
+        wal:
+          wal_capacity_mb: 32
+          wal_segments_ahead: 2
+        performance:
+          max_search_threads: 0
+
+volumes:
+  ollama: {}
+  open-webui: {}
+  qdrant_data: {}
+  vllm_models: {}
+
+networks:
+  desktop_net:
+    driver: bridge
