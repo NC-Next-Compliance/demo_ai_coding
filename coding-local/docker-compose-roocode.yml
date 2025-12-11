@@ -110,11 +110,11 @@ services:
       - path: .env.sample
         required: true
     healthcheck:
-      test: ["CMD-SHELL", "timeout 10s bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
-      interval: 30s
-      timeout: 15s
-      retries: 5
-      start_period: 40s
+      test: ["CMD-SHELL", "curl -f http://localhost:6333/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   open-webui:
     image: ghcr.io/open-webui/open-webui:${WEBUI_DOCKER_TAG:-main}
@@ -126,7 +126,7 @@ services:
       ollama:
         condition: service_healthy
       qdrant:
-        condition: service_healthy
+        condition: service_started
     ports:
       - ${OPEN_WEBUI_PORT:-3000}:8080
     environment:
@@ -204,11 +204,11 @@ services:
       - path: .env.sample
         required: true
     healthcheck:
-      test: ["CMD-SHELL", "timeout 10s bash -c ':> /dev/tcp/127.0.0.1/8080' || exit 1"]
-      interval: 30s
-      timeout: 15s
-      retries: 5
-      start_period: 60s
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 45s
 
 configs:
   qdrant_config:
